@@ -13,7 +13,8 @@ import {
   Users,
   Settings,
   LogOut,
-  ChevronDown
+  ChevronDown,
+  Sparkles
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -85,6 +86,9 @@ export default function DashboardLayout({
             </NavItem>
             <NavItem href="/dashboard/maintenance" icon={<Wrench className="h-5 w-5" />}>
               Maintenance
+            </NavItem>
+            <NavItem href="/dashboard/turnovers" icon={<Sparkles className="h-5 w-5" />}>
+              Turnovers
             </NavItem>
             <NavItem href="/dashboard/team" icon={<Users className="h-5 w-5" />}>
               Team
