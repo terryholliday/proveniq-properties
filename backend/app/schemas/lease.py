@@ -76,6 +76,21 @@ class LeaseResponse(BaseSchema, IDMixin, TimestampMixin):
     tenant_phone: Optional[str] = None
     invite_sent_at: Optional[datetime] = None
     notes: Optional[str] = None
+    
+    # Denormalized fields for list views
+    unit_number: Optional[str] = None
+    property_name: Optional[str] = None
+    property_id: Optional[UUID] = None
+    occupancy_model: Optional[str] = None
+    has_move_in_inspection: bool = False
+    has_move_out_inspection: bool = False
+
+
+class LeaseListResponse(BaseSchema):
+    """Response for lease list endpoint."""
+    
+    leases: list[LeaseResponse]
+    total: int
 
 
 class LeaseInviteRequest(BaseSchema):
