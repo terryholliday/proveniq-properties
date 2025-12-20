@@ -55,3 +55,35 @@ class OrgWithMembership(OrgResponse):
     """Org response with current user's membership."""
 
     current_user_role: OrgRole
+
+
+class OrgMemberResponse(BaseSchema):
+    """Member in organization list."""
+
+    id: str
+    email: str
+    name: Optional[str] = None
+    role: str
+    joined_at: str
+    last_active: Optional[str] = None
+
+
+class OrgMemberListResponse(BaseSchema):
+    """Response for organization members list."""
+
+    members: list[OrgMemberResponse]
+
+
+class OrgInviteRequest(BaseSchema):
+    """Request to invite a member."""
+
+    email: EmailStr
+    role: str = "ORG_MEMBER"
+
+
+class OrgInviteResponse(BaseSchema):
+    """Response after sending invite."""
+
+    email: str
+    role: str
+    message: str
