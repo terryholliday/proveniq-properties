@@ -277,6 +277,73 @@ export const inspectionsApi = {
   },
 }
 
+// Turnovers API
+export const turnoversApi = {
+  list: (token: string, params?: { unitId?: string; status?: string; assignedToMe?: boolean }) => {
+    const searchParams = new URLSearchParams()
+    if (params?.unitId) searchParams.set('unit_id', params.unitId)
+    if (params?.status) searchParams.set('status_filter', params.status)
+    if (params?.assignedToMe) searchParams.set('assigned_to_me', 'true')
+    const query = searchParams.toString()
+    return apiRequest<any[]>(`/turnovers${query ? `?${query}` : ''}`, { token })
+  },
+
+  get: (id: string, token: string) =>
+    apiRequest<any>(`/turnovers/${id}`, { token }),
+
+  create: (data: {
+    unit_id: string
+    scheduled_date: string
+    due_by?: string
+    checkout_booking_id?: string
+    checkin_booking_id?: string
+    assigned_cleaner_id?: string
+  }, token: string) =>
+    apiRequest(`/turnovers`, { method: 'POST', body: data, token }),
+
+  update: (id: string, data: any, token: string) =>
+    apiRequest(`/turnovers/${id}`, { method: 'PATCH', body: data, token }),
+
+  start: (id: string, token: string) =>
+    apiRequest(`/turnovers/${id}/start`, { method: 'POST', token }),
+
+  complete: (id: string, token: string) =>
+    apiRequest(`/turnovers/${id}/complete`, { method: 'POST', token }),
+
+  verify: (id: string, token: string) =>
+    apiRequest(`/turnovers/${id}/verify`, { method: 'POST', token }),
+
+  flag: (id: string, hostNotes: string, token: string) =>
+    apiRequest(`/turnovers/${id}/flag?host_notes=${encodeURIComponent(hostNotes)}`, { method: 'POST', token }),
+
+  presignPhoto: (id: string, data: { photo_type: string; mime_type: string; file_size_bytes: number }, token: string) =>
+    apiRequest<{ upload_url: string; object_path: string; photo_type: string }>(
+      `/turnovers/${id}/photos/presign`,
+      { method: 'POST', body: data, token }
+    ),
+
+  confirmPhoto: (id: string, data: {
+    object_path: string
+    photo_type: string
+    file_hash: string
+    file_size_bytes: number
+    notes?: string
+  }, token: string) =>
+    apiRequest(`/turnovers/${id}/photos/confirm`, { method: 'POST', body: data, token }),
+
+  addInventory: (id: string, data: {
+    item_name: string
+    location: string
+    expected_quantity: number
+    actual_quantity: number
+    notes?: string
+  }, token: string) =>
+    apiRequest(`/turnovers/${id}/inventory`, { method: 'POST', body: data, token }),
+
+  getMyTurnovers: (token: string) =>
+    apiRequest<any[]>(`/turnovers/cleaners/my-turnovers`, { token }),
+}
+
 // Vendors API
 export const vendorsApi = {
   list: (token: string) =>

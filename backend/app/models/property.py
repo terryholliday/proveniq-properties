@@ -9,12 +9,13 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.enums import PropertyType, UnitStatus
+from app.models.enums import PropertyType, UnitStatus, OccupancyModel
 
 if TYPE_CHECKING:
     from app.models.org import Organization
     from app.models.lease import Lease
     from app.models.maintenance import MaintenanceTicket
+    from app.models.booking import Booking
 
 
 class Property(Base):
@@ -38,6 +39,13 @@ class Property(Base):
     property_type: Mapped[PropertyType] = mapped_column(
         SQLEnum(PropertyType),
         default=PropertyType.RESIDENTIAL,
+        nullable=False,
+    )
+    
+    # STR support: determines inspection cadence and signing semantics
+    occupancy_model: Mapped[OccupancyModel] = mapped_column(
+        SQLEnum(OccupancyModel),
+        default=OccupancyModel.LONG_TERM_RESIDENTIAL,
         nullable=False,
     )
     
@@ -121,4 +129,8 @@ class Unit(Base):
     )
     maintenance_tickets: Mapped[list["MaintenanceTicket"]] = relationship(
         "MaintenanceTicket", back_populates="unit", cascade="all, delete-orphan"
+    )
+    # STR bookings
+    bookings: Mapped[list["Booking"]] = relationship(
+        "Booking", back_populates="unit", cascade="all, delete-orphan"
     )

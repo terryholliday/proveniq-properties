@@ -4,12 +4,12 @@ import uuid
 from datetime import datetime, date
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import String, DateTime, Date, ForeignKey, Enum as SQLEnum, Text, BigInteger, Integer, CheckConstraint
+from sqlalchemy import String, DateTime, Date, ForeignKey, Enum as SQLEnum, Text, BigInteger, Integer, CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.enums import LeaseStatus, LeaseType
+from app.models.enums import LeaseStatus, LeaseType, TenantRole, InviteStatus
 
 if TYPE_CHECKING:
     from app.models.property import Unit
@@ -95,7 +95,10 @@ class Lease(Base):
 
 
 class TenantAccess(Base):
-    """Links a user (tenant) to a lease they have access to."""
+    """Links a user (tenant) to a lease they have access to.
+    
+    Golden Master v2.3.1: Added role, status, and invite tracking.
+    """
 
     __tablename__ = "tenant_access"
 
@@ -110,17 +113,36 @@ class TenantAccess(Base):
         nullable=False,
         index=True,
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    tenant_user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     
-    is_primary: Mapped[bool] = mapped_column(default=True)
+    # Role: PRIMARY (leaseholder) or OCCUPANT (additional tenant)
+    role: Mapped[TenantRole] = mapped_column(
+        SQLEnum(TenantRole),
+        default=TenantRole.PRIMARY,
+        nullable=False,
+    )
     
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Invite status tracking
+    status: Mapped[InviteStatus] = mapped_column(
+        SQLEnum(InviteStatus),
+        default=InviteStatus.INVITED,
+        nullable=False,
+    )
+    
+    # Timestamps
+    invited_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     lease: Mapped["Lease"] = relationship("Lease", back_populates="tenant_access")
-    user: Mapped["User"] = relationship("User", back_populates="tenant_access")
+    user: Mapped["User"] = relationship("User", back_populates="tenant_access", foreign_keys=[tenant_user_id])
+
+    __table_args__ = (
+        UniqueConstraint('lease_id', 'tenant_user_id', name='uq_tenant_access_lease_user'),
+    )

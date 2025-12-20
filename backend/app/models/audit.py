@@ -12,10 +12,13 @@ from app.core.database import Base
 from app.models.enums import AuditAction
 
 
-class AuditLog(Base):
-    """Immutable audit log for compliance tracking."""
+class AuditLogCore(Base):
+    """Immutable audit log for compliance-critical events.
+    
+    Golden Master v2.3.1: Core audit events only (evidence, signatures, submissions).
+    """
 
-    __tablename__ = "audit_log"
+    __tablename__ = "audit_log_core"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -44,6 +47,49 @@ class AuditLog(Base):
     # Resource being acted upon
     resource_type: Mapped[str] = mapped_column(String(50), nullable=False)
     resource_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    
+    # Details
+    details: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    
+    # Request context
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ActivityLog(Base):
+    """Activity log for non-critical user actions.
+    
+    Golden Master v2.3.1: Separate from audit_log_core for performance.
+    """
+
+    __tablename__ = "activity_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    org_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Activity type (view, list, search, etc.)
+    activity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    
+    # Resource being viewed/accessed
+    resource_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    resource_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     
     # Details
     details: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
