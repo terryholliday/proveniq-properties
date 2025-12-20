@@ -14,7 +14,8 @@ import {
   Settings,
   LogOut,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  FileText
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -80,6 +81,9 @@ export default function DashboardLayout({
             </NavItem>
             <NavItem href="/dashboard/properties" icon={<Home className="h-5 w-5" />}>
               Properties
+            </NavItem>
+            <NavItem href="/dashboard/leases" icon={<FileText className="h-5 w-5" />}>
+              Leases
             </NavItem>
             <NavItem href="/dashboard/inspections" icon={<FileCheck className="h-5 w-5" />}>
               Inspections
