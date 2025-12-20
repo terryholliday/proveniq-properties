@@ -27,6 +27,7 @@ from app.models.property import Property, Unit
 from app.models.enums import InspectionType, InspectionStatus
 from app.services.mason import MasonService
 from app.services.storage import get_storage_service
+from app.services.claimsiq import get_claimsiq_client, ClaimSubmissionResult
 
 
 class ClaimPacketService:
@@ -114,6 +115,130 @@ class ClaimPacketService:
         filename = f"claim_packet_{property_name}_{unit_number}_{date_str}.zip"
         
         return zip_bytes, filename
+    
+    async def generate_and_submit(
+        self,
+        lease_id: UUID,
+        org_id: UUID,
+        include_evidence: bool = True,
+        submit_to_claimsiq: bool = True,
+    ) -> tuple[bytes, str, Optional[ClaimSubmissionResult]]:
+        """
+        Generate claim packet AND submit to ClaimsIQ.
+        
+        This is the primary method for the Evidence → Recovery pipeline.
+        
+        Args:
+            lease_id: The lease to generate packet for
+            org_id: Organization ID for authorization
+            include_evidence: Whether to include evidence files in ZIP
+            submit_to_claimsiq: Whether to push claim to ClaimsIQ
+            
+        Returns:
+            Tuple of (zip_bytes, filename, claimsiq_result)
+        """
+        # Get lease with property info
+        lease = await self._get_lease(lease_id, org_id)
+        
+        # Get move-in and move-out inspections
+        move_in = await self._get_inspection(lease_id, InspectionType.MOVE_IN)
+        move_out = await self._get_inspection(lease_id, InspectionType.MOVE_OUT)
+        
+        if not move_in:
+            raise ValueError("No signed move-in inspection found")
+        if not move_out:
+            raise ValueError("No signed move-out inspection found")
+        
+        # Build diff
+        diff_items = self._build_diff(move_in, move_out)
+        
+        # Get cost estimates from Mason
+        estimates = await self.mason.estimate_diff_costs(
+            [
+                {
+                    "room_name": item["room_name"],
+                    "item_name": item["item_name"],
+                    "condition_change": item["condition_change"],
+                }
+                for item in diff_items
+            ],
+            org_id=org_id,
+        )
+        
+        # Build claim summary
+        claim_summary = self._build_claim_summary(
+            lease=lease,
+            move_in=move_in,
+            move_out=move_out,
+            diff_items=diff_items,
+            estimates=estimates,
+        )
+        
+        # Generate ZIP
+        zip_bytes = await self._create_zip(
+            claim_summary=claim_summary,
+            move_in=move_in,
+            move_out=move_out,
+            include_evidence=include_evidence,
+        )
+        
+        # Generate filename
+        property_name = lease["property_name"].replace(" ", "_")
+        unit_number = lease["unit_number"]
+        date_str = datetime.utcnow().strftime("%Y%m%d")
+        filename = f"claim_packet_{property_name}_{unit_number}_{date_str}.zip"
+        
+        # Submit to ClaimsIQ if enabled
+        claimsiq_result = None
+        if submit_to_claimsiq:
+            claimsiq_result = await self._submit_to_claimsiq(
+                lease_id=lease_id,
+                org_id=org_id,
+                lease=lease,
+                claim_summary=claim_summary,
+            )
+        
+        return zip_bytes, filename, claimsiq_result
+    
+    async def _submit_to_claimsiq(
+        self,
+        lease_id: UUID,
+        org_id: UUID,
+        lease: Dict[str, Any],
+        claim_summary: Dict[str, Any],
+    ) -> ClaimSubmissionResult:
+        """Submit claim to ClaimsIQ for processing."""
+        client = get_claimsiq_client()
+        
+        # Extract damaged items for ClaimsIQ
+        damaged_items = [
+            {
+                "room": item["room"],
+                "item": item["item"],
+                "condition_before": item["condition_before"],
+                "condition_after": item["condition_after"],
+                "estimated_cents": next(
+                    (e["estimated_cents"] for e in claim_summary["estimate"]["items"]
+                     if e["room"] == item["room"] and e["item"] == item["item"]),
+                    0
+                ),
+            }
+            for item in claim_summary["damages"]["items"]
+        ]
+        
+        return await client.submit_deposit_claim(
+            lease_id=lease_id,
+            org_id=org_id,
+            claimant_email=lease.get("tenant_email", ""),
+            property_address=claim_summary["property"]["address"],
+            unit_number=claim_summary["property"]["unit"],
+            move_in_hash=claim_summary["inspections"]["move_in"]["content_hash"],
+            move_out_hash=claim_summary["inspections"]["move_out"]["content_hash"],
+            damaged_items=damaged_items,
+            total_damage_cents=claim_summary["estimate"]["total_cents"],
+            deposit_amount_cents=lease.get("deposit_amount_cents", 0),
+            evidence_hashes=claim_summary["integrity"]["evidence_hashes"],
+        )
     
     async def _get_lease(self, lease_id: UUID, org_id: UUID) -> Dict[str, Any]:
         """Get lease with property details."""

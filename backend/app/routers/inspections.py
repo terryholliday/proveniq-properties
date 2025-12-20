@@ -886,6 +886,7 @@ async def get_inspection_certificate(
 async def download_claim_packet(
     lease_id: UUID,
     include_evidence: bool = True,
+    submit_claim: bool = True,
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
@@ -896,6 +897,9 @@ async def download_claim_packet(
     - README.txt: Human-readable summary
     - evidence/: All photos with integrity verification
     
+    If submit_claim=true (default), also pushes the claim to ClaimsIQ
+    for automated processing through the recovery pipeline.
+    
     Use this for:
     - Airbnb/VRBO Resolution Center submissions
     - Insurance claim filings
@@ -904,10 +908,11 @@ async def download_claim_packet(
     service = ClaimPacketService(db)
     
     try:
-        zip_bytes, filename = await service.generate_packet(
+        zip_bytes, filename, claimsiq_result = await service.generate_and_submit(
             lease_id=lease_id,
             org_id=current_user.org_id,
             include_evidence=include_evidence,
+            submit_to_claimsiq=submit_claim,
         )
     except ValueError as e:
         raise HTTPException(
@@ -915,12 +920,21 @@ async def download_claim_packet(
             detail=str(e),
         )
     
+    # Add ClaimsIQ result to headers if submitted
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Length": str(len(zip_bytes)),
+    }
+    if claimsiq_result:
+        headers["X-ClaimsIQ-Submitted"] = "true" if claimsiq_result.success else "false"
+        if claimsiq_result.claim_id:
+            headers["X-ClaimsIQ-Claim-ID"] = claimsiq_result.claim_id
+        if claimsiq_result.decision:
+            headers["X-ClaimsIQ-Decision"] = claimsiq_result.decision
+    
     # Return as streaming response
     return StreamingResponse(
         io.BytesIO(zip_bytes),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(zip_bytes)),
-        },
+        headers=headers,
     )

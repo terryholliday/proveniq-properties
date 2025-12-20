@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Mason AI
     mason_enabled: bool = True
 
+    # ClaimsIQ Integration
+    claimsiq_enabled: bool = False
+    claimsiq_base_url: str = "http://localhost:3000"
+    claimsiq_api_key: Optional[str] = None
+
     @property
     def bucket_name(self) -> str:
         """Get the appropriate bucket name based on storage provider."""
