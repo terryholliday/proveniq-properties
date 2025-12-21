@@ -397,4 +397,129 @@ export const maintenanceApi = {
     }>(`/maintenance/${ticketId}/triage`, { method: 'POST', body: {}, token }),
 }
 
+// Dashboard API
+export const dashboardApi = {
+  getStats: (token: string) =>
+    apiRequest<{
+      properties: { total: number; residential: number; commercial: number; mixed_use: number }
+      units: { total: number; occupied: number; vacant: number; occupancy_rate: number }
+      leases: { total: number; active: number; pending: number; draft: number; expiring_soon: number }
+      revenue: { monthly_rent_roll_cents: number; deposits_held_cents: number }
+      inspections: { pending: number; completed_this_month: number }
+      maintenance: { open: number; in_progress: number; completed_this_month: number }
+    }>('/dashboard/stats', { token }),
+
+  getExpiringLeases: (token: string, days: number = 30) =>
+    apiRequest<{
+      leases: Array<{
+        id: string
+        tenant_name: string
+        tenant_email: string
+        end_date: string
+        days_until_expiry: number
+        rent_amount_cents: number
+        unit: { id: string; unit_number: string }
+        property: { id: string; name: string; address: string }
+      }>
+      total: number
+      days_window: number
+    }>(`/dashboard/leases/expiring?days=${days}`, { token }),
+
+  getRecentActivity: (token: string, limit: number = 20) =>
+    apiRequest<{
+      activities: Array<{
+        type: string
+        action: string
+        timestamp: string
+        details: Record<string, unknown>
+      }>
+      total: number
+    }>(`/dashboard/activity/recent?limit=${limit}`, { token }),
+
+  getOccupancyByProperty: (token: string) =>
+    apiRequest<{
+      properties: Array<{
+        id: string
+        name: string
+        property_type: string
+        total_units: number
+        occupied_units: number
+        vacancy_rate: number
+      }>
+      total: number
+    }>('/dashboard/occupancy/by-property', { token }),
+}
+
+// Reports API
+export const reportsApi = {
+  getRentRoll: (token: string, propertyId?: string) =>
+    apiRequest<{
+      generated_at: string
+      total_properties: number
+      total_units: number
+      occupied_units: number
+      vacancy_rate: number
+      total_monthly_rent_cents: number
+      total_annual_rent_cents: number
+      properties: Array<{
+        property_id: string
+        name: string
+        total_units: number
+        occupied_units: number
+        monthly_rent_cents: number
+        units: Array<{
+          unit_id: string
+          unit_number: string
+          status: string
+          lease?: {
+            tenant_name: string
+            rent_amount_cents: number
+            end_date: string
+          }
+        }>
+      }>
+    }>(`/reports/rent-roll${propertyId ? `?property_id=${propertyId}` : ''}`, { token }),
+
+  getLeaseExpiration: (token: string, monthsAhead: number = 12) =>
+    apiRequest<{
+      total_expiring_leases: number
+      total_rent_at_risk_cents: number
+      by_month: Array<{
+        month: string
+        month_label: string
+        lease_count: number
+        rent_at_risk_cents: number
+        leases: Array<{
+          lease_id: string
+          tenant_name: string
+          end_date: string
+          rent_amount_cents: number
+          property_name: string
+        }>
+      }>
+    }>(`/reports/lease-expiration?months_ahead=${monthsAhead}`, { token }),
+
+  getMaintenanceSummary: (token: string, period: string = 'month') =>
+    apiRequest<{
+      total_tickets: number
+      by_status: Record<string, number>
+      by_priority: Record<string, number>
+      total_cost_cents: number
+      completion_rate: number
+    }>(`/reports/maintenance-summary?period=${period}`, { token }),
+
+  getCamReconciliation: (token: string, propertyId: string, year?: number) =>
+    apiRequest<{
+      property: { id: string; name: string; total_leasable_sq_ft: number }
+      total_nnn_tenants: number
+      total_annual_cam_budget_cents: number
+      tenants: Array<{
+        unit_number: string
+        tenant_name: string
+        pro_rata_share_pct: number
+        annual_cam_budget_cents: number
+      }>
+    }>(`/reports/commercial/cam-reconciliation?property_id=${propertyId}${year ? `&year=${year}` : ''}`, { token }),
+}
+
 export { ApiError }

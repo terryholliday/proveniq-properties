@@ -16,6 +16,8 @@ from app.routers import (
     maintenance_router,
     bookings_router,
     turnovers_router,
+    dashboard_router,
+    reports_router,
 )
 
 settings = get_settings()
@@ -57,6 +59,8 @@ app.include_router(vendors_router, prefix=settings.api_v1_prefix)
 app.include_router(maintenance_router, prefix=settings.api_v1_prefix)
 app.include_router(bookings_router, prefix=settings.api_v1_prefix)  # STR support
 app.include_router(turnovers_router, prefix=settings.api_v1_prefix)  # STR turnover workflow
+app.include_router(dashboard_router, prefix=settings.api_v1_prefix)  # Dashboard & reporting
+app.include_router(reports_router, prefix=settings.api_v1_prefix)  # Financial & operational reports
 
 
 @app.get("/health")

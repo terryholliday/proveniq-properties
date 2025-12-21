@@ -106,3 +106,33 @@ class LeaseInviteResponse(BaseSchema):
     tenant_email: str
     invite_sent_at: datetime
     message: str = "Invite sent successfully"
+
+
+class LeaseRenewalRequest(BaseSchema):
+    """Request to initiate lease renewal."""
+
+    new_end_date: date
+    new_rent_amount_cents: int = Field(..., gt=0)
+    new_deposit_amount_cents: Optional[int] = Field(None, ge=0)
+    new_cam_budget_cents: Optional[int] = Field(None, ge=0)
+    notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_end_date(self):
+        """New end date must be in the future."""
+        if self.new_end_date <= date.today():
+            raise ValueError("new_end_date must be in the future")
+        return self
+
+
+class LeaseRenewalResponse(BaseSchema):
+    """Response after initiating lease renewal."""
+
+    original_lease_id: UUID
+    renewed_lease_id: UUID
+    new_start_date: date
+    new_end_date: date
+    new_rent_amount_cents: int
+    rent_change_cents: int
+    rent_change_pct: float
+    message: str = "Renewal lease created successfully"

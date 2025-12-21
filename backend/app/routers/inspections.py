@@ -11,6 +11,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
 from app.core.database import get_db
 from app.core.security import get_current_user, require_org_member, AuthenticatedUser, compute_content_hash
@@ -861,23 +863,43 @@ async def get_inspection_certificate(
             detail="Inspection must be submitted before certificate is available",
         )
 
-    # Check if certificate exists
-    if not inspection.certificate_pdf_path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Certificate not yet generated. Please try again shortly.",
+    # If certificate already generated and stored, redirect to it
+    if inspection.certificate_pdf_path:
+        storage = get_storage_service()
+        download_url = await storage.get_download_url(
+            inspection.certificate_pdf_path,
+            ttl_seconds=300,  # 5 minute expiry
         )
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=download_url, status_code=302)
 
-    # Get presigned download URL for certificate
-    storage = get_storage_service()
-    download_url = await storage.get_download_url(
-        inspection.certificate_pdf_path,
-        ttl_seconds=300,  # 5 minute expiry
-    )
+    # Otherwise generate on-demand PDF with content hash
+    if not inspection.content_hash:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing content hash for certificate")
 
-    # Redirect to presigned URL
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url=download_url, status_code=302)
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawString(72, 720, "PROVENIQ Properties - Inspection Certificate")
+    pdf.setFont("Helvetica", 11)
+    lines = [
+        f"Inspection ID: {inspection_id}",
+        f"Lease ID: {inspection.lease_id}",
+        f"Content Hash (SHA-256): {inspection.content_hash}",
+        f"Status: {inspection.status}",
+        f"Submitted At: {inspection.submitted_at}",
+        f"Signed At: {inspection.signed_at or inspection.tenant_signed_at or inspection.landlord_signed_at}",
+        f"Generated At: {datetime.utcnow().isoformat()}",
+    ]
+    y = 690
+    for line in lines:
+        pdf.drawString(72, y, line)
+        y -= 18
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    headers = {"Content-Disposition": f'inline; filename="inspection_{inspection_id}_certificate.pdf"'}
+    return StreamingResponse(buffer, media_type="application/pdf", headers=headers)
 
 
 # --- Claim Packet Export ---

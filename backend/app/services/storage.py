@@ -48,6 +48,11 @@ class StorageProviderInterface(ABC):
         """Delete an object from storage."""
         pass
 
+    @abstractmethod
+    async def head_object(self, object_path: str) -> Optional[dict]:
+        """Get object metadata (HEAD). Returns dict with generation/etag or None."""
+        pass
+
 
 class GCSStorageProvider(StorageProviderInterface):
     """Google Cloud Storage provider."""
@@ -109,6 +114,17 @@ class GCSStorageProvider(StorageProviderInterface):
             blob.delete()
             return True
         return False
+
+    async def head_object(self, object_path: str) -> Optional[dict]:
+        blob = self.bucket.blob(object_path)
+        if blob.exists():
+            blob.reload()
+            return {
+                "generation": str(blob.generation),
+                "size": blob.size,
+                "content_type": blob.content_type,
+            }
+        return None
 
 
 class S3StorageProvider(StorageProviderInterface):
@@ -188,6 +204,17 @@ class S3StorageProvider(StorageProviderInterface):
         except Exception:
             return False
 
+    async def head_object(self, object_path: str) -> Optional[dict]:
+        try:
+            response = self.client.head_object(Bucket=self.bucket_name, Key=object_path)
+            return {
+                "etag": response.get("ETag", "").strip('"'),
+                "size": response.get("ContentLength"),
+                "content_type": response.get("ContentType"),
+            }
+        except Exception:
+            return None
+
 
 class StorageService:
     """High-level storage service wrapping provider interface."""
@@ -260,6 +287,10 @@ class StorageService:
     async def get_download_url(self, object_path: str, ttl_seconds: int = 3600) -> str:
         """Get a presigned download URL."""
         return await self.provider.generate_presigned_download_url(object_path, ttl_seconds)
+
+    async def head_object(self, object_path: str) -> Optional[dict]:
+        """Get object metadata (HEAD). Returns dict with generation/etag or None."""
+        return await self.provider.head_object(object_path)
 
 
 def get_storage_service() -> StorageService:

@@ -7,3 +7,4 @@ from app.schemas.lease import *
 from app.schemas.inspection import *
 from app.schemas.vendor import *
 from app.schemas.maintenance import *
+from app.schemas.booking import *

@@ -20,6 +20,8 @@ from app.schemas.lease import (
     LeaseListResponse,
     LeaseInviteRequest,
     LeaseInviteResponse,
+    LeaseRenewalRequest,
+    LeaseRenewalResponse,
 )
 from app.models.inspection import Inspection
 from app.services.audit import AuditService
@@ -274,3 +276,176 @@ async def send_tenant_invite(
         tenant_email=lease.tenant_email,
         invite_sent_at=lease.invite_sent_at,
     )
+
+
+@router.post("/{lease_id}/renew", response_model=LeaseRenewalResponse)
+async def renew_lease(
+    lease_id: UUID,
+    data: LeaseRenewalRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_org_member),
+):
+    """Initiate lease renewal.
+    
+    Creates a new lease starting from the old lease's end date.
+    The original lease remains unchanged (for historical record).
+    
+    Flow:
+    1. Validate original lease is active and not already renewed
+    2. Create new lease with updated terms
+    3. Link new lease to original (via notes for now)
+    4. Return both lease IDs
+    """
+    # Get original lease with property context
+    result = await db.execute(
+        select(Lease, Unit, Property)
+        .join(Unit, Lease.unit_id == Unit.id)
+        .join(Property, Unit.property_id == Property.id)
+        .where(
+            Lease.id == lease_id,
+            Property.org_id == current_user.org_id,
+        )
+    )
+    row = result.one_or_none()
+
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found")
+
+    original_lease, unit, prop = row
+
+    # Validate lease can be renewed
+    if original_lease.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot renew lease with status '{original_lease.status}'. Only active leases can be renewed.",
+        )
+
+    # Check new end date is after original end date
+    if data.new_end_date <= original_lease.end_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New end date must be after current lease end date",
+        )
+
+    # Calculate rent change
+    old_rent = original_lease.rent_amount_cents or 0
+    new_rent = data.new_rent_amount_cents
+    rent_change = new_rent - old_rent
+    rent_change_pct = round((rent_change / max(old_rent, 1)) * 100, 2)
+
+    # Create renewal lease
+    renewal_notes = f"Renewal of lease {lease_id}"
+    if data.notes:
+        renewal_notes += f"\n{data.notes}"
+
+    new_lease = Lease(
+        unit_id=original_lease.unit_id,
+        lease_type=original_lease.lease_type,
+        start_date=original_lease.end_date,  # New lease starts when old ends
+        end_date=data.new_end_date,
+        rent_amount_cents=data.new_rent_amount_cents,
+        deposit_amount_cents=data.new_deposit_amount_cents or original_lease.deposit_amount_cents,
+        pro_rata_share_bps=original_lease.pro_rata_share_bps,
+        cam_budget_cents=data.new_cam_budget_cents or original_lease.cam_budget_cents,
+        tenant_email=original_lease.tenant_email,
+        tenant_name=original_lease.tenant_name,
+        tenant_phone=original_lease.tenant_phone,
+        notes=renewal_notes,
+        status="draft",  # Renewal starts as draft, needs tenant acceptance
+    )
+    db.add(new_lease)
+
+    # Audit log
+    audit = AuditService(db)
+    await audit.log(
+        action="LEASE_RENEWED",
+        org_id=current_user.org_id,
+        user_id=current_user.db_user_id,
+        resource_type="lease",
+        resource_id=str(lease_id),
+        details={
+            "original_lease_id": str(lease_id),
+            "new_end_date": data.new_end_date.isoformat(),
+            "old_rent_cents": old_rent,
+            "new_rent_cents": new_rent,
+            "rent_change_pct": rent_change_pct,
+        },
+        ip_address=request.client.host if request.client else None,
+    )
+
+    await db.commit()
+    await db.refresh(new_lease)
+
+    return LeaseRenewalResponse(
+        original_lease_id=original_lease.id,
+        renewed_lease_id=new_lease.id,
+        new_start_date=new_lease.start_date,
+        new_end_date=new_lease.end_date,
+        new_rent_amount_cents=new_lease.rent_amount_cents,
+        rent_change_cents=rent_change,
+        rent_change_pct=rent_change_pct,
+    )
+
+
+@router.post("/{lease_id}/terminate")
+async def terminate_lease(
+    lease_id: UUID,
+    request: Request,
+    early_termination: bool = False,
+    termination_date: datetime = None,
+    reason: str = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_org_member),
+):
+    """Terminate a lease.
+    
+    Marks the lease as terminated. For active leases, this triggers
+    the move-out inspection workflow.
+    """
+    result = await db.execute(
+        select(Lease)
+        .join(Unit)
+        .join(Property)
+        .where(
+            Lease.id == lease_id,
+            Property.org_id == current_user.org_id,
+        )
+    )
+    lease = result.scalar_one_or_none()
+
+    if not lease:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found")
+
+    if lease.status == "terminated":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lease is already terminated",
+        )
+
+    lease.status = "terminated"
+    
+    # Audit log
+    audit = AuditService(db)
+    await audit.log(
+        action="LEASE_TERMINATED",
+        org_id=current_user.org_id,
+        user_id=current_user.db_user_id,
+        resource_type="lease",
+        resource_id=str(lease_id),
+        details={
+            "early_termination": early_termination,
+            "termination_date": termination_date.isoformat() if termination_date else None,
+            "reason": reason,
+        },
+        ip_address=request.client.host if request.client else None,
+    )
+
+    await db.commit()
+
+    return {
+        "lease_id": str(lease.id),
+        "status": "terminated",
+        "early_termination": early_termination,
+        "message": "Lease terminated successfully. Move-out inspection should be scheduled.",
+    }

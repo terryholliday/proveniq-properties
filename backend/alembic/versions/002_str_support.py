@@ -24,11 +24,31 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create new enums using raw SQL to avoid SQLAlchemy auto-creation issues
-    op.execute("CREATE TYPE occupancymodel AS ENUM ('long_term_residential', 'commercial_lease', 'short_term_rental')")
-    op.execute("CREATE TYPE inspectionscope AS ENUM ('lease', 'booking')")
-    op.execute("CREATE TYPE inspectionsignedby AS ENUM ('TENANT', 'LANDLORD_ORG_MEMBER', 'HOST_SYSTEM')")
-    op.execute("CREATE TYPE bookingstatus AS ENUM ('upcoming', 'checked_in', 'checked_out', 'cancelled', 'disputed')")
+    # Create new enums using DO blocks to handle if they already exist from model imports
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE occupancymodel AS ENUM ('long_term_residential', 'commercial_lease', 'short_term_rental');
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE inspectionscope AS ENUM ('lease', 'booking');
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE inspectionsignedby AS ENUM ('TENANT', 'LANDLORD_ORG_MEMBER', 'HOST_SYSTEM');
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE bookingstatus AS ENUM ('upcoming', 'checked_in', 'checked_out', 'cancelled', 'disputed');
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
+    """)
 
     # Extend inspection_type enum with STR types
     # Must commit first to use new values in constraints

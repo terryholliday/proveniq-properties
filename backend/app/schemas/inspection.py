@@ -7,7 +7,10 @@ from uuid import UUID
 from pydantic import Field
 
 from app.schemas.base import BaseSchema, IDMixin, TimestampMixin
-from app.models.enums import InspectionType, InspectionStatus, EvidenceType
+from app.models.enums import (
+    InspectionType, InspectionStatus, EvidenceType, InspectionScope, InspectionSignedBy,
+    InspectionCondition, EvidenceSource, StorageInstanceKind,
+)
 
 
 class InspectionCreate(BaseSchema):
@@ -16,6 +19,9 @@ class InspectionCreate(BaseSchema):
     lease_id: UUID
     inspection_type: InspectionType
     inspection_date: datetime
+    # STR support
+    scope: InspectionScope = InspectionScope.LEASE
+    booking_id: Optional[str] = Field(None, max_length=255)
     notes: Optional[str] = None
 
 
@@ -34,90 +40,105 @@ class InspectionResponse(BaseSchema, IDMixin, TimestampMixin):
     supplemental_to_inspection_id: Optional[UUID] = None
     inspection_type: InspectionType
     status: InspectionStatus
+    # STR support
+    scope: InspectionScope
+    booking_id: Optional[str] = None
+    # Dates
     inspection_date: datetime
     content_hash: Optional[str] = None
     schema_version: int
+    # Lease-scoped signatures
     tenant_signed_at: Optional[datetime] = None
     landlord_signed_at: Optional[datetime] = None
+    # STR host attestation
+    signed_by: Optional[InspectionSignedBy] = None
+    signed_actor_id: Optional[UUID] = None
+    signed_at: Optional[datetime] = None
     notes: Optional[str] = None
     item_count: int = 0
 
 
 class InspectionItemCreate(BaseSchema):
-    """Create/upsert inspection item."""
+    """Create/upsert inspection item (Golden Master v2.3.1)."""
 
-    room_name: str = Field(..., min_length=1, max_length=100)
-    item_name: str = Field(..., min_length=1, max_length=100)
-    condition_rating: Optional[int] = Field(None, ge=1, le=5)
-    condition_notes: Optional[str] = None
-    is_damaged: bool = False
-    damage_description: Optional[str] = None
+    room_key: str = Field(..., min_length=1, max_length=100)
+    item_key: str = Field(..., min_length=1, max_length=100)
+    ordinal: int = Field(default=0, ge=0)
+    condition: InspectionCondition = InspectionCondition.GOOD
+    notes: Optional[str] = None
 
 
 class InspectionItemUpdate(BaseSchema):
-    """Update inspection item."""
+    """Update inspection item (Golden Master v2.3.1)."""
 
-    condition_rating: Optional[int] = Field(None, ge=1, le=5)
-    condition_notes: Optional[str] = None
-    is_damaged: Optional[bool] = None
-    damage_description: Optional[str] = None
+    condition: Optional[InspectionCondition] = None
+    notes: Optional[str] = None
 
 
 class InspectionItemResponse(BaseSchema, IDMixin, TimestampMixin):
-    """Inspection item response."""
+    """Inspection item response (Golden Master v2.3.1)."""
 
     inspection_id: UUID
-    room_name: str
-    item_name: str
-    condition_rating: Optional[int] = None
-    condition_notes: Optional[str] = None
-    is_damaged: bool
-    damage_description: Optional[str] = None
+    room_key: str
+    item_key: str
+    ordinal: int
+    condition: InspectionCondition
+    notes: Optional[str] = None
     mason_estimated_repair_cents: Optional[int] = None
     evidence_count: int = 0
 
 
 class EvidencePresignRequest(BaseSchema):
-    """Request presigned URL for evidence upload."""
+    """Request presigned URL for evidence upload (Golden Master v2.3.1).
+    
+    MUST bind exact Content-Type and size range.
+    """
 
-    item_id: UUID
-    file_name: str = Field(..., min_length=1, max_length=255)
+    inspection_item_id: UUID
     mime_type: str = Field(..., pattern=r"^(image|video|audio|application)/.+$")
-    file_size_bytes: int = Field(..., gt=0, le=52428800)  # 50MB max
+    size_bytes: int = Field(..., gt=0, le=52428800)  # 50MB max
+    evidence_source: EvidenceSource = EvidenceSource.TENANT
 
 
 class EvidencePresignResponse(BaseSchema):
-    """Presigned URL response."""
+    """Presigned URL response (Golden Master v2.3.1)."""
 
+    evidence_id: UUID
     upload_url: str
     object_path: str
     expires_at: datetime
-    max_size_bytes: int
+    bound_mime_type: str
+    bound_size_bytes: int
 
 
 class EvidenceConfirmRequest(BaseSchema):
-    """Confirm evidence upload."""
+    """Confirm evidence upload (Golden Master v2.3.1).
+    
+    Idempotent confirm. Server performs HEAD check, records storage_instance_id.
+    """
 
-    item_id: UUID
+    inspection_item_id: UUID
     object_path: str
-    file_hash: str = Field(..., min_length=64, max_length=64)  # SHA-256
-    file_size_bytes: int = Field(..., gt=0)
+    confirm_idempotency_key: str = Field(..., min_length=1, max_length=255)
     mime_type: str
+    size_bytes: int = Field(..., gt=0)
+    file_sha256_claimed: str = Field(..., min_length=64, max_length=64)
 
 
 class EvidenceResponse(BaseSchema, IDMixin):
-    """Evidence response."""
+    """Evidence response (Golden Master v2.3.1)."""
 
-    item_id: UUID
-    evidence_type: EvidenceType
+    inspection_item_id: UUID
     object_path: str
-    file_name: str
     mime_type: str
-    file_size_bytes: int
-    file_hash: str
-    is_confirmed: bool
-    confirmed_at: Optional[datetime] = None
-    metadata: Optional[dict[str, Any]] = None
+    size_bytes: int
+    file_sha256_claimed: str
+    file_sha256_verified: Optional[str] = None
+    confirmed_at: datetime
+    evidence_source: EvidenceSource
+    storage_instance_kind: StorageInstanceKind
+    storage_instance_id: str
+    confirm_idempotency_key: str
     created_at: datetime
 
 
@@ -183,3 +204,23 @@ class MasonEstimateResponse(BaseSchema):
     estimated_refund_cents: int
     disclaimer: str = "This is a non-binding advisory estimate. Actual costs may vary."
     generated_at: datetime
+
+
+# --- STR Attestation ---
+
+class InspectionAttestRequest(BaseSchema):
+    """STR host attestation request."""
+
+    pass  # No additional fields needed - attestation uses current user
+
+
+class InspectionAttestResponse(BaseSchema):
+    """Response after STR host attestation."""
+
+    inspection_id: UUID
+    status: InspectionStatus
+    content_hash: str
+    signed_by: InspectionSignedBy
+    signed_actor_id: UUID
+    signed_at: datetime
+    message: str = "Inspection attested and locked. Evidence is now immutable."

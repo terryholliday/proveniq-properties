@@ -9,6 +9,8 @@ from app.routers.vendors import router as vendors_router
 from app.routers.maintenance import router as maintenance_router
 from app.routers.bookings import router as bookings_router
 from app.routers.turnovers import router as turnovers_router
+from app.routers.dashboard import router as dashboard_router
+from app.routers.reports import router as reports_router
 
 __all__ = [
     "auth_router",
@@ -20,4 +22,6 @@ __all__ = [
     "maintenance_router",
     "bookings_router",
     "turnovers_router",
+    "dashboard_router",
+    "reports_router",
 ]

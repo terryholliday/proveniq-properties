@@ -1,3 +1,5 @@
+name: proveniq-properties
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -9,7 +11,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - proveniq_properties_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U proveniq -d proveniq_properties"]
       interval: 5s
@@ -17,4 +19,4 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
+  proveniq_properties_postgres_data:

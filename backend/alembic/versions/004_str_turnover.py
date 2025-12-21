@@ -15,76 +15,90 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create turnover status enum
+    # Create turnover status enum (IF NOT EXISTS)
     op.execute("""
-        CREATE TYPE turnoverstatus AS ENUM (
-            'pending', 'in_progress', 'completed', 'verified', 'flagged'
-        )
+        DO $$ BEGIN
+            CREATE TYPE turnoverstatus AS ENUM (
+                'pending', 'in_progress', 'completed', 'verified', 'flagged'
+            );
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
     """)
     
-    # Create turnover photo type enum
+    # Create turnover photo type enum (IF NOT EXISTS)
     op.execute("""
-        CREATE TYPE turnoverphoto AS ENUM (
-            'bed', 'kitchen', 'bathroom', 'towels', 'keys', 'inventory'
-        )
+        DO $$ BEGIN
+            CREATE TYPE turnoverphoto AS ENUM (
+                'bed', 'kitchen', 'bathroom', 'towels', 'keys', 'inventory'
+            );
+        EXCEPTION WHEN duplicate_object THEN NULL;
+        END $$;
     """)
     
     # Add ORG_CLEANER to orgrole enum
     op.execute("ALTER TYPE orgrole ADD VALUE IF NOT EXISTS 'ORG_CLEANER'")
     
-    # Create turnovers table
-    op.create_table(
-        'turnovers',
-        sa.Column('id', UUID(as_uuid=True), primary_key=True),
-        sa.Column('unit_id', UUID(as_uuid=True), sa.ForeignKey('units.id', ondelete='CASCADE'), nullable=False, index=True),
-        sa.Column('checkout_booking_id', UUID(as_uuid=True), sa.ForeignKey('bookings.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('checkin_booking_id', UUID(as_uuid=True), sa.ForeignKey('bookings.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('assigned_cleaner_id', UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True),
-        sa.Column('scheduled_date', sa.DateTime(), nullable=False),
-        sa.Column('due_by', sa.DateTime(), nullable=True),
-        sa.Column('status', sa.Enum('pending', 'in_progress', 'completed', 'verified', 'flagged', name='turnoverstatus', create_type=False), nullable=False, default='pending', index=True),
-        sa.Column('started_at', sa.DateTime(), nullable=True),
-        sa.Column('completed_at', sa.DateTime(), nullable=True),
-        sa.Column('verified_at', sa.DateTime(), nullable=True),
-        sa.Column('verified_by_id', UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('cleaner_notes', sa.Text(), nullable=True),
-        sa.Column('host_notes', sa.Text(), nullable=True),
-        sa.Column('has_damage', sa.Boolean(), default=False),
-        sa.Column('needs_restock', sa.Boolean(), default=False),
-        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
-    )
+    # Create turnovers table using raw SQL to bypass SQLAlchemy enum auto-creation
+    op.execute("""
+        CREATE TABLE turnovers (
+            id UUID PRIMARY KEY,
+            unit_id UUID NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+            checkout_booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
+            checkin_booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
+            assigned_cleaner_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            scheduled_date TIMESTAMP NOT NULL,
+            due_by TIMESTAMP,
+            status turnoverstatus NOT NULL DEFAULT 'pending',
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            verified_at TIMESTAMP,
+            verified_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            cleaner_notes TEXT,
+            host_notes TEXT,
+            has_damage BOOLEAN DEFAULT FALSE,
+            needs_restock BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    op.create_index('ix_turnovers_unit_id', 'turnovers', ['unit_id'])
+    op.create_index('ix_turnovers_assigned_cleaner_id', 'turnovers', ['assigned_cleaner_id'])
+    op.create_index('ix_turnovers_status', 'turnovers', ['status'])
     
-    # Create turnover_photos table
-    op.create_table(
-        'turnover_photos',
-        sa.Column('id', UUID(as_uuid=True), primary_key=True),
-        sa.Column('turnover_id', UUID(as_uuid=True), sa.ForeignKey('turnovers.id', ondelete='CASCADE'), nullable=False, index=True),
-        sa.Column('photo_type', sa.Enum('bed', 'kitchen', 'bathroom', 'towels', 'keys', 'inventory', name='turnoverphoto', create_type=False), nullable=False),
-        sa.Column('object_path', sa.String(500), nullable=False),
-        sa.Column('file_hash', sa.String(64), nullable=False),
-        sa.Column('mime_type', sa.String(100), default='image/jpeg'),
-        sa.Column('file_size_bytes', sa.Integer(), nullable=False),
-        sa.Column('notes', sa.Text(), nullable=True),
-        sa.Column('is_flagged', sa.Boolean(), default=False),
-        sa.Column('uploaded_at', sa.DateTime(), default=sa.func.now()),
-        sa.Column('uploaded_by_id', UUID(as_uuid=True), sa.ForeignKey('users.id', ondelete='SET NULL'), nullable=True),
-    )
+    # Create turnover_photos table using raw SQL
+    op.execute("""
+        CREATE TABLE turnover_photos (
+            id UUID PRIMARY KEY,
+            turnover_id UUID NOT NULL REFERENCES turnovers(id) ON DELETE CASCADE,
+            photo_type turnoverphoto NOT NULL,
+            object_path VARCHAR(500) NOT NULL,
+            file_hash VARCHAR(64) NOT NULL,
+            mime_type VARCHAR(100) DEFAULT 'image/jpeg',
+            file_size_bytes INTEGER NOT NULL,
+            notes TEXT,
+            is_flagged BOOLEAN DEFAULT FALSE,
+            uploaded_at TIMESTAMP DEFAULT NOW(),
+            uploaded_by_id UUID REFERENCES users(id) ON DELETE SET NULL
+        )
+    """)
+    op.create_index('ix_turnover_photos_turnover_id', 'turnover_photos', ['turnover_id'])
     
     # Create turnover_inventory table
-    op.create_table(
-        'turnover_inventory',
-        sa.Column('id', UUID(as_uuid=True), primary_key=True),
-        sa.Column('turnover_id', UUID(as_uuid=True), sa.ForeignKey('turnovers.id', ondelete='CASCADE'), nullable=False, index=True),
-        sa.Column('item_name', sa.String(255), nullable=False),
-        sa.Column('location', sa.String(255), default=''),
-        sa.Column('expected_quantity', sa.Integer(), default=0),
-        sa.Column('actual_quantity', sa.Integer(), default=0),
-        sa.Column('is_missing', sa.Boolean(), default=False),
-        sa.Column('is_damaged', sa.Boolean(), default=False),
-        sa.Column('notes', sa.Text(), nullable=True),
-        sa.Column('checked_at', sa.DateTime(), default=sa.func.now()),
-    )
+    op.execute("""
+        CREATE TABLE turnover_inventory (
+            id UUID PRIMARY KEY,
+            turnover_id UUID NOT NULL REFERENCES turnovers(id) ON DELETE CASCADE,
+            item_name VARCHAR(255) NOT NULL,
+            location VARCHAR(255) DEFAULT '',
+            expected_quantity INTEGER DEFAULT 0,
+            actual_quantity INTEGER DEFAULT 0,
+            is_missing BOOLEAN DEFAULT FALSE,
+            is_damaged BOOLEAN DEFAULT FALSE,
+            notes TEXT,
+            checked_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    op.create_index('ix_turnover_inventory_turnover_id', 'turnover_inventory', ['turnover_id'])
     
     # Create unique constraint for photo type per turnover
     op.create_unique_constraint(

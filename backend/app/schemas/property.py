@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from app.schemas.base import BaseSchema, IDMixin, TimestampMixin
-from app.models.enums import PropertyType, UnitStatus
+from app.models.enums import PropertyType, UnitStatus, OccupancyModel
 
 
 class PropertyCreate(BaseSchema):
@@ -15,6 +15,7 @@ class PropertyCreate(BaseSchema):
 
     name: str = Field(..., min_length=2, max_length=255)
     property_type: PropertyType
+    occupancy_model: OccupancyModel = OccupancyModel.LONG_TERM_RESIDENTIAL
     
     address_line1: str = Field(..., min_length=5, max_length=255)
     address_line2: Optional[str] = Field(None, max_length=255)
@@ -40,6 +41,7 @@ class PropertyUpdate(BaseSchema):
     """Update property."""
 
     name: Optional[str] = Field(None, min_length=2, max_length=255)
+    occupancy_model: Optional[OccupancyModel] = None
     address_line1: Optional[str] = Field(None, min_length=5, max_length=255)
     address_line2: Optional[str] = Field(None, max_length=255)
     city: Optional[str] = Field(None, min_length=2, max_length=100)
@@ -56,6 +58,7 @@ class PropertyResponse(BaseSchema, IDMixin, TimestampMixin):
     org_id: UUID
     name: str
     property_type: PropertyType
+    occupancy_model: OccupancyModel
     address_line1: str
     address_line2: Optional[str] = None
     city: str
