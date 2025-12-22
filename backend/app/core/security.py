@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from typing import Any, Optional
 from uuid import UUID
 
@@ -17,13 +18,32 @@ from app.core.database import get_db
 
 settings = get_settings()
 
-# Initialize Firebase Admin SDK
-if not firebase_admin._apps:
-    if settings.google_application_credentials:
-        cred = credentials.Certificate(settings.google_application_credentials)
+
+def _ensure_firebase_initialized() -> None:
+    if firebase_admin._apps:
+        return
+
+    cred_path = settings.google_application_credentials
+    if cred_path:
+        cred_path = cred_path.strip('"')
+
+    if cred_path:
+        if not os.path.exists(cred_path):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Firebase credentials file not found. Configure GOOGLE_APPLICATION_CREDENTIALS.",
+            )
+        cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred)
-    else:
+        return
+
+    try:
         firebase_admin.initialize_app()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Firebase not configured: {str(e)}",
+        )
 
 security = HTTPBearer()
 
@@ -57,6 +77,7 @@ async def verify_firebase_token(
     token = credentials.credentials
 
     try:
+        _ensure_firebase_initialized()
         decoded_token = auth.verify_id_token(token)
     except auth.InvalidIdTokenError:
         raise HTTPException(

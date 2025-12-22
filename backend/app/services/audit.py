@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.audit import AuditLog
+from app.models.audit import AuditLogCore as AuditLog
 from app.models.enums import AuditAction
 
 
