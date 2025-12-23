@@ -1,18 +1,26 @@
 """
 PROVENIQ Properties - Ledger Service
 
-Writes property/inspection events to the PROVENIQ Ledger for immutable audit trail.
+CANONICAL SCHEMA v1.0.0
+- Uses DOMAIN_NOUN_VERB_PAST event naming
+- Publishes to /api/v1/events/canonical endpoint
+- Includes idempotency_key for duplicate prevention
 """
 
+import hashlib
+import json
 import logging
 from datetime import datetime
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 import httpx
 
 logger = logging.getLogger(__name__)
 
-LEDGER_API_URL = "http://localhost:8006/api/v1"
+LEDGER_API_URL = "http://localhost:8006"
+SCHEMA_VERSION = "1.0.0"
+PRODUCER = "properties"
+PRODUCER_VERSION = "1.0.0"
 
 
 class LedgerService:
@@ -30,6 +38,11 @@ class LedgerService:
     def __init__(self, base_url: str = LEDGER_API_URL):
         self.base_url = base_url
     
+    def _hash_payload(self, payload: dict) -> str:
+        """Calculate SHA256 hash of payload."""
+        payload_str = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(payload_str.encode()).hexdigest()
+
     async def write_event(
         self,
         event_type: str,
@@ -37,29 +50,54 @@ class LedgerService:
         actor_id: str,
         payload: dict,
         correlation_id: Optional[str] = None,
+        subject_extra: Optional[dict] = None,
     ) -> Optional[dict]:
-        """Write an event to the Ledger."""
+        """Write a canonical event to the Ledger."""
+        corr_id = correlation_id or str(uuid4())
+        idempotency_key = f"properties_{uuid4()}"
+        occurred_at = datetime.utcnow().isoformat() + "Z"
+        canonical_hash = self._hash_payload(payload)
+
+        subject = {"asset_id": asset_id or "SYSTEM"}
+        if subject_extra:
+            subject.update(subject_extra)
+
+        canonical_event = {
+            "schema_version": SCHEMA_VERSION,
+            "event_type": event_type,
+            "occurred_at": occurred_at,
+            "committed_at": occurred_at,
+            "correlation_id": corr_id,
+            "idempotency_key": idempotency_key,
+            "producer": PRODUCER,
+            "producer_version": PRODUCER_VERSION,
+            "subject": subject,
+            "payload": {
+                **payload,
+                "actor_id": actor_id,
+            },
+            "canonical_hash_hex": canonical_hash,
+        }
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.base_url}/events",
-                    json={
-                        "source": "properties",
-                        "event_type": event_type,
-                        "asset_id": asset_id,
-                        "actor_id": actor_id,
-                        "correlation_id": correlation_id,
-                        "payload": payload,
-                    },
+                    f"{self.base_url}/api/v1/events/canonical",
+                    json=canonical_event,
                     timeout=10.0,
                 )
                 
-                if response.status_code != 201:
-                    logger.warning(f"[LEDGER] Write failed: {response.status_code}")
+                if response.status_code not in (200, 201):
+                    logger.warning(f"[LEDGER] Write failed: {response.status_code} {response.text}")
                     return None
                 
                 data = response.json()
-                return data.get("data", {}).get("event", data)
+                return {
+                    "event_id": data.get("event_id"),
+                    "sequence_number": data.get("sequence_number"),
+                    "entry_hash": data.get("entry_hash"),
+                    "committed_at": data.get("committed_at"),
+                }
         except Exception as e:
             logger.error(f"[LEDGER] Write error: {e}")
             return None
