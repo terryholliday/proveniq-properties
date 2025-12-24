@@ -112,12 +112,74 @@ class MaintenanceStatus(str, Enum):
 
 
 class VendorSpecialty(str, Enum):
-    """Vendor specialty type."""
+    """Vendor specialty type (service domain)."""
     GENERAL = "GENERAL"
     PLUMBING = "PLUMBING"
     HVAC = "HVAC"
     ELECTRICAL = "ELECTRICAL"
     ROOFING = "ROOFING"
+    APPLIANCE = "APPLIANCE"
+    LANDSCAPING = "LANDSCAPING"
+    CLEANING = "CLEANING"
+    PEST_CONTROL = "PEST_CONTROL"
+    LOCKSMITH = "LOCKSMITH"
+
+
+class VendorStatus(str, Enum):
+    """Status of a vendor."""
+    PENDING = "pending"
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    INACTIVE = "inactive"
+
+
+class VendorType(str, Enum):
+    """Type of vendor business."""
+    INDIVIDUAL = "individual"
+    COMPANY = "company"
+    FRANCHISE = "franchise"
+
+
+class LicenseType(str, Enum):
+    """Type of professional license (from Service)."""
+    # Residential
+    LICENSED_HANDYMAN = "LICENSED_HANDYMAN"
+    LICENSED_PLUMBER = "LICENSED_PLUMBER"
+    LICENSED_ELECTRICIAN = "LICENSED_ELECTRICIAN"
+    GC_LICENSE = "GC_LICENSE"
+    HVAC_CERTIFIED = "HVAC_CERTIFIED"
+    # Automotive
+    ASE_CERTIFIED = "ASE_CERTIFIED"
+    ASE_MASTER = "ASE_MASTER"
+    OEM_CERTIFIED = "OEM_CERTIFIED"
+    # Marine/Aviation
+    MARINE_TECH_CERT = "MARINE_TECH_CERT"
+    A_AND_P = "A_AND_P"
+    IA = "IA"
+    # Other
+    INSURED = "INSURED"
+    BONDED = "BONDED"
+
+
+class WorkOrderStatus(str, Enum):
+    """Status of a work order (enhanced from MaintenanceStatus)."""
+    CREATED = "created"
+    PENDING_ASSIGNMENT = "pending_assignment"
+    ASSIGNED = "assigned"
+    SCHEDULED = "scheduled"
+    IN_PROGRESS = "in_progress"
+    PENDING_APPROVAL = "pending_approval"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    DISPUTED = "disputed"
+
+
+class WorkOrderUrgency(str, Enum):
+    """Urgency level of a work order."""
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    EMERGENCY = "emergency"
 
 
 class EvidenceType(str, Enum):
