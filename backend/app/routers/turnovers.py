@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.security import get_current_user, require_org_member, AuthenticatedUser
+from app.core.security import get_current_user, require_org_member, require_org_admin, AuthenticatedUser
 from app.models.turnover import Turnover, TurnoverPhoto, TurnoverInventory
 from app.models.property import Property, Unit
 from app.models.booking import Booking
@@ -176,6 +176,34 @@ def check_photos_complete(photos: List[TurnoverPhoto]) -> bool:
     return MANDATORY_PHOTOS.issubset(uploaded_types)
 
 
+def is_cleaner_role(org_role: str) -> bool:
+    """Check if user has cleaner role (restricted access)."""
+    return org_role == OrgRole.ORG_CLEANER.value
+
+
+async def require_turnover_access(
+    turnover: Turnover,
+    current_user: AuthenticatedUser,
+    allow_cleaner: bool = True,
+) -> None:
+    """Verify user has access to this turnover.
+    
+    Cleaners can only access turnovers assigned to them.
+    Owners/Admins/Agents can access all org turnovers.
+    """
+    if is_cleaner_role(current_user.org_role):
+        if not allow_cleaner:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cleaners cannot perform this action"
+            )
+        if turnover.assigned_cleaner_id != current_user.db_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not assigned to this turnover"
+            )
+
+
 # === Endpoints ===
 
 @router.post("", response_model=TurnoverResponse)
@@ -184,7 +212,15 @@ async def create_turnover(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Create a new turnover for an STR unit."""
+    """Create a new turnover for an STR unit.
+    
+    Cleaners cannot create turnovers - only owners/admins/agents.
+    """
+    if is_cleaner_role(current_user.org_role):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cleaners cannot create turnovers"
+        )
     # Verify unit belongs to org
     unit_result = await db.execute(
         select(Unit)
@@ -282,8 +318,12 @@ async def get_turnover(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Get a specific turnover."""
+    """Get a specific turnover.
+    
+    Cleaners can only view turnovers assigned to them.
+    """
     turnover = await get_turnover_with_auth(turnover_id, db, current_user)
+    await require_turnover_access(turnover, current_user)
 
     return TurnoverResponse(
         **{k: v for k, v in turnover.__dict__.items() if not k.startswith('_')},
@@ -325,8 +365,12 @@ async def start_turnover(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Start a turnover (cleaner arrives on-site)."""
+    """Start a turnover (cleaner arrives on-site).
+    
+    Cleaners can only start turnovers assigned to them.
+    """
     turnover = await get_turnover_with_auth(turnover_id, db, current_user)
+    await require_turnover_access(turnover, current_user)
 
     if turnover.status != TurnoverStatus.PENDING:
         raise HTTPException(
@@ -354,8 +398,12 @@ async def complete_turnover(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Complete a turnover (all photos submitted)."""
+    """Complete a turnover (all photos submitted).
+    
+    Cleaners can only complete turnovers assigned to them.
+    """
     turnover = await get_turnover_with_auth(turnover_id, db, current_user)
+    await require_turnover_access(turnover, current_user)
 
     if turnover.status != TurnoverStatus.IN_PROGRESS:
         raise HTTPException(
@@ -462,8 +510,12 @@ async def presign_photo_upload(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Get presigned URL for photo upload."""
+    """Get presigned URL for photo upload.
+    
+    Cleaners can only upload photos to turnovers assigned to them.
+    """
     turnover = await get_turnover_with_auth(turnover_id, db, current_user)
+    await require_turnover_access(turnover, current_user)
 
     if turnover.status not in (TurnoverStatus.PENDING, TurnoverStatus.IN_PROGRESS):
         raise HTTPException(
@@ -502,8 +554,12 @@ async def confirm_photo_upload(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Confirm photo upload after successful upload to storage."""
+    """Confirm photo upload after successful upload to storage.
+    
+    Cleaners can only confirm photos for turnovers assigned to them.
+    """
     turnover = await get_turnover_with_auth(turnover_id, db, current_user)
+    await require_turnover_access(turnover, current_user)
 
     if turnover.status not in (TurnoverStatus.PENDING, TurnoverStatus.IN_PROGRESS):
         raise HTTPException(
@@ -543,8 +599,12 @@ async def add_inventory_check(
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_org_member),
 ):
-    """Add an inventory check to a turnover."""
+    """Add an inventory check to a turnover.
+    
+    Cleaners can only add inventory checks to turnovers assigned to them.
+    """
     turnover = await get_turnover_with_auth(turnover_id, db, current_user)
+    await require_turnover_access(turnover, current_user)
 
     inventory = TurnoverInventory(
         turnover_id=turnover_id,

@@ -1,5 +1,6 @@
 """Bookings router for STR (Short-Term Rental) support."""
 
+import io
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -35,6 +36,9 @@ from app.schemas.booking import (
 )
 from app.services.audit import AuditService
 from app.services.mason import MasonService
+from app.services.pdf_generator import get_pdf_generator
+from app.models.turnover import Turnover
+from app.models.enums import TurnoverStatus
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -339,6 +343,16 @@ async def check_out_booking(
     )
     db.add(post_stay_inspection)
 
+    # Auto-create turnover for the next booking window
+    # This allows cleaners to start preparing for the next guest
+    turnover = Turnover(
+        unit_id=booking.unit_id,
+        checkout_booking_id=booking.id,
+        scheduled_date=booking.actual_check_out,
+        status=TurnoverStatus.PENDING,
+    )
+    db.add(turnover)
+
     await db.commit()
 
     return await get_booking(booking_id, db, current_user)
@@ -508,4 +522,34 @@ async def get_claim_packet(
         evidence_hash_list=evidence_hashes,
         narrative=narrative,
         generated_at=datetime.utcnow(),
+    )
+
+
+@router.get("/{booking_id}/claim-packet/pdf")
+async def download_claim_packet_pdf(
+    booking_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_org_member),
+):
+    """Download STR claim packet as PDF for Resolution Center submission.
+    
+    Generates a professional PDF suitable for Airbnb/VRBO dispute resolution.
+    """
+    # Get the claim packet data first
+    claim_data = await get_claim_packet(booking_id, db, current_user)
+    
+    # Generate PDF
+    pdf_gen = get_pdf_generator()
+    pdf_bytes = pdf_gen.generate_str_claim_packet(claim_data.model_dump())
+    
+    # Generate filename
+    date_str = datetime.utcnow().strftime("%Y%m%d")
+    filename = f"claim_packet_{booking_id}_{date_str}.pdf"
+    
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+        },
     )
