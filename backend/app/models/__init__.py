@@ -1,4 +1,9 @@
-"""SQLAlchemy models for PROVENIQ Properties."""
+"""SQLAlchemy models for PROVENIQ Properties.
+
+Includes Service module (migrated from proveniq-service):
+- VendorLicense
+- VendorReview
+"""
 
 from app.models.user import User
 from app.models.org import Organization, OrgMembership
@@ -6,6 +11,8 @@ from app.models.property import Property, Unit
 from app.models.lease import Lease, TenantAccess
 from app.models.inspection import Inspection, InspectionItem, InspectionEvidence
 from app.models.vendor import Vendor
+from app.models.vendor_license import VendorLicense
+from app.models.vendor_review import VendorReview
 from app.models.maintenance import MaintenanceTicket
 from app.models.audit import AuditLogCore, ActivityLog, MasonLog
 from app.models.booking import Booking
@@ -24,6 +31,8 @@ __all__ = [
     "InspectionItem",
     "InspectionEvidence",
     "Vendor",
+    "VendorLicense",
+    "VendorReview",
     "MaintenanceTicket",
     "AuditLogCore",
     "ActivityLog",
