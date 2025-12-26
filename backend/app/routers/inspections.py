@@ -267,6 +267,16 @@ async def upsert_inspection_item(
                     if registration and registration.get("paid"):
                         item.paid = registration["paid"]
                         print(f"[Core] Fixture registered with PAID: {registration['paid']}")
+                        
+                        # P0: Get fixture valuation from Core
+                        valuation = await core_client.get_fixture_valuation(
+                            paid=registration["paid"],
+                            category=data.room_name,
+                            condition=data.condition or "good",
+                        )
+                        if valuation:
+                            item.estimated_value = valuation.get("estimated_value")
+                            print(f"[Core] Fixture valued at: ${valuation.get('estimated_value')}")
             except Exception as e:
                 print(f"[Core] Fixture registration unavailable: {e}")
 
