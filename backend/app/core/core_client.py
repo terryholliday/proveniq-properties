@@ -178,6 +178,94 @@ class CoreClient:
             results.append(valuation or {"paid": fixture.get("paid"), "error": "Failed"})
         return results
 
+    async def assess_damage(
+        self,
+        paid: str,
+        before_image_urls: List[str],
+        after_image_urls: List[str],
+        category: str = "appliances",
+    ) -> Optional[Dict[str, Any]]:
+        """P1: Compare before/after condition for damage assessment."""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/api/v1/condition/compare",
+                    json={
+                        "assetId": paid,
+                        "beforeImageUrls": before_image_urls,
+                        "afterImageUrls": after_image_urls,
+                        "category": category,
+                        "context": "inspection",
+                    },
+                    headers={"X-Source-App": self.source_app},
+                    timeout=15.0,
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"[Core] Damage assessment: {data.get('before', {}).get('condition')} → {data.get('after', {}).get('condition')}")
+                    return data
+
+                print(f"[Core] Damage assessment failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            print(f"[Core] Damage assessment error: {e}")
+            return None
+
+    async def get_deposit_dispute_score(
+        self,
+        paid: str,
+        damage_assessment: Dict[str, Any],
+        deposit_amount_cents: int,
+        claimed_damage_cents: int,
+    ) -> Dict[str, Any]:
+        """P1: Score deposit dispute based on damage evidence."""
+        try:
+            # Calculate score from damage assessment
+            deterioration = damage_assessment.get("comparison", {}).get("deteriorationScore", 0)
+            recommendation = damage_assessment.get("recommendation", "no_action")
+            
+            # Evidence strength
+            evidence_score = min(deterioration * 2, 100)
+            
+            # Claim reasonableness
+            if claimed_damage_cents > deposit_amount_cents:
+                reasonableness = 50  # Claiming more than deposit
+            elif claimed_damage_cents > deterioration * deposit_amount_cents / 100:
+                reasonableness = 70
+            else:
+                reasonableness = 90
+            
+            overall_score = (evidence_score + reasonableness) / 2
+            
+            if overall_score >= 70:
+                verdict = "LANDLORD_FAVOR"
+            elif overall_score >= 40:
+                verdict = "SPLIT"
+            else:
+                verdict = "TENANT_FAVOR"
+
+            return {
+                "paid": paid,
+                "evidenceScore": evidence_score,
+                "reasonablenessScore": reasonableness,
+                "overallScore": overall_score,
+                "verdict": verdict,
+                "recommendation": recommendation,
+                "deteriorationPercent": deterioration,
+                "suggestedDeduction": min(claimed_damage_cents, int(deposit_amount_cents * deterioration / 100)),
+            }
+
+        except Exception as e:
+            print(f"[Core] Deposit dispute scoring error: {e}")
+            return {
+                "paid": paid,
+                "overallScore": 50,
+                "verdict": "MANUAL_REVIEW",
+                "error": str(e),
+            }
+
     async def _get_provenance(
         self,
         paid: str,
