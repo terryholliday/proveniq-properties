@@ -48,6 +48,7 @@ from app.services.mason import MasonService
 from app.services.canonical import compute_canonical_hash
 from app.services.jobs import JobsService
 from app.services.claim_packet import ClaimPacketService
+from app.core.core_client import get_core_client
 
 router = APIRouter(prefix="/inspections", tags=["inspections"])
 
@@ -244,6 +245,30 @@ async def upsert_inspection_item(
             **data.model_dump(),
         )
         db.add(item)
+
+        # P0: Register fixture with Core to get PAID
+        if current_user.org_id:
+            try:
+                core_client = get_core_client()
+                # Get property/unit info from inspection
+                lease_result = await db.execute(
+                    select(Lease).options(selectinload(Lease.unit)).where(Lease.id == inspection.lease_id)
+                )
+                lease = lease_result.scalar_one_or_none()
+                if lease and lease.unit:
+                    registration = await core_client.register_fixture(
+                        landlord_id=str(current_user.org_id),
+                        fixture_name=data.item_name,
+                        category=data.room_name,  # Use room as category proxy
+                        unit_id=str(lease.unit_id),
+                        property_id=str(lease.unit.property_id),
+                        condition=data.condition or "good",
+                    )
+                    if registration and registration.get("paid"):
+                        item.paid = registration["paid"]
+                        print(f"[Core] Fixture registered with PAID: {registration['paid']}")
+            except Exception as e:
+                print(f"[Core] Fixture registration unavailable: {e}")
 
     await db.commit()
     await db.refresh(item)
