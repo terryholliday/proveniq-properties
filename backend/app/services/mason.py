@@ -257,3 +257,182 @@ class MasonService:
         self.db.add(log_entry)
 
         return output
+
+    async def analyze_damage(
+        self,
+        item_name: str,
+        room_name: str,
+        condition_before: int,
+        condition_after: int,
+        description: str,
+        photo_hashes: list[str] = None,
+        org_id: Optional[UUID] = None,
+    ) -> dict[str, Any]:
+        """Analyze damage to an inspection item.
+        
+        Returns:
+            Dict with damage severity, estimated cost, recommended action
+        """
+        start_time = datetime.utcnow()
+        condition_change = condition_after - condition_before
+        
+        # Determine damage severity
+        if condition_change >= 0:
+            severity = "none"
+            severity_score = 0
+        elif condition_change == -1:
+            severity = "minor"
+            severity_score = 25
+        elif condition_change == -2:
+            severity = "moderate"
+            severity_score = 50
+        elif condition_change == -3:
+            severity = "significant"
+            severity_score = 75
+        else:
+            severity = "severe"
+            severity_score = 100
+        
+        # Estimate repair cost
+        estimated_cost = await self.estimate_item_repair_cost(
+            room_name=room_name,
+            item_name=item_name,
+            condition_change=condition_change,
+        )
+        
+        # Determine recommended action
+        if severity == "none":
+            recommended_action = "no_action"
+            action_description = "No damage detected. No action required."
+        elif severity == "minor":
+            recommended_action = "document_only"
+            action_description = "Minor wear. Document for records, no immediate repair needed."
+        elif severity == "moderate":
+            recommended_action = "schedule_repair"
+            action_description = "Moderate damage. Schedule repair before next occupancy."
+        elif severity == "significant":
+            recommended_action = "immediate_repair"
+            action_description = "Significant damage. Repair required before next occupancy."
+        else:
+            recommended_action = "professional_assessment"
+            action_description = "Severe damage. Recommend professional assessment and potential claim."
+        
+        # Check if claimable
+        deposit_deductible = severity in ("moderate", "significant", "severe")
+        claim_eligible = severity in ("significant", "severe") and estimated_cost >= 50000
+        
+        processing_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        
+        output = {
+            "item_name": item_name,
+            "room_name": room_name,
+            "condition_before": condition_before,
+            "condition_after": condition_after,
+            "severity": severity,
+            "severity_score": severity_score,
+            "estimated_repair_cents": estimated_cost,
+            "recommended_action": recommended_action,
+            "action_description": action_description,
+            "deposit_deductible": deposit_deductible,
+            "claim_eligible": claim_eligible,
+            "photo_evidence_count": len(photo_hashes) if photo_hashes else 0,
+            "disclaimer": self.DISCLAIMER,
+            "analyzed_at": datetime.utcnow().isoformat(),
+        }
+        
+        # Log Mason decision
+        if org_id:
+            log_entry = MasonLog(
+                org_id=org_id,
+                action_type="damage_analysis",
+                resource_type="inspection_item",
+                resource_id=UUID("00000000-0000-0000-0000-000000000000"),
+                input_data={
+                    "item_name": item_name,
+                    "room_name": room_name,
+                    "condition_before": condition_before,
+                    "condition_after": condition_after,
+                    "description": description,
+                },
+                output_data=output,
+                processing_time_ms=processing_time_ms,
+            )
+            self.db.add(log_entry)
+        
+        return output
+
+    async def generate_deposit_advisory(
+        self,
+        inspection_id: UUID,
+        diff_items: list[dict[str, Any]],
+        deposit_amount_cents: int,
+        org_id: UUID,
+    ) -> dict[str, Any]:
+        """Generate deposit deduction advisory for move-out.
+        
+        GUARDRAILS:
+        - Advisory only, not binding
+        - Always show reasoning
+        - Never auto-deduct
+        """
+        start_time = datetime.utcnow()
+        
+        # Analyze all items
+        deductible_items = []
+        total_deduction = 0
+        
+        for item in diff_items:
+            condition_change = item.get("condition_change", 0)
+            if condition_change >= 0:
+                continue
+            
+            analysis = await self.analyze_damage(
+                item_name=item["item_name"],
+                room_name=item["room_name"],
+                condition_before=item.get("condition_before", 5),
+                condition_after=item.get("condition_after", 5),
+                description=item.get("description", ""),
+            )
+            
+            if analysis["deposit_deductible"]:
+                deductible_items.append({
+                    **item,
+                    "analysis": analysis,
+                })
+                total_deduction += analysis["estimated_repair_cents"]
+        
+        # Cap at deposit amount
+        recommended_deduction = min(total_deduction, deposit_amount_cents)
+        recommended_refund = deposit_amount_cents - recommended_deduction
+        
+        processing_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        
+        output = {
+            "inspection_id": str(inspection_id),
+            "deposit_amount_cents": deposit_amount_cents,
+            "total_damage_cost_cents": total_deduction,
+            "recommended_deduction_cents": recommended_deduction,
+            "recommended_refund_cents": recommended_refund,
+            "deductible_items": deductible_items,
+            "deduction_percentage": round(recommended_deduction / deposit_amount_cents * 100, 1) if deposit_amount_cents > 0 else 0,
+            "disclaimer": self.DISCLAIMER,
+            "advisory_note": "This is a non-binding advisory. Owner must review and approve all deductions.",
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+        
+        # Log Mason decision
+        log_entry = MasonLog(
+            org_id=org_id,
+            action_type="deposit_advisory",
+            resource_type="inspection",
+            resource_id=inspection_id,
+            input_data={
+                "diff_items_count": len(diff_items),
+                "deposit_amount_cents": deposit_amount_cents,
+            },
+            output_data=output,
+            processing_time_ms=processing_time_ms,
+        )
+        self.db.add(log_entry)
+        
+        return output

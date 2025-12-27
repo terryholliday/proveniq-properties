@@ -141,6 +141,91 @@ class ServiceBridge:
         }
         return mapping.get(urgency.lower(), "MEDIUM")
 
+    async def sync_completion(
+        self,
+        work_order_id: str,
+        ticket_id: UUID,
+    ) -> Optional[dict]:
+        """Sync work order completion back to Properties maintenance ticket."""
+        status = await self.get_work_order_status(work_order_id)
+        if not status:
+            return None
+        
+        return {
+            "work_order_id": work_order_id,
+            "ticket_id": str(ticket_id),
+            "status": status.get("status"),
+            "completed_at": status.get("completedAt"),
+            "provider": status.get("provider"),
+            "total_cost_cents": status.get("totalCostCents"),
+            "invoice_url": status.get("invoiceUrl"),
+            "synced_at": datetime.utcnow().isoformat(),
+        }
+
+    async def dispatch_from_inspection(
+        self,
+        inspection_id: UUID,
+        property_id: UUID,
+        unit_id: Optional[UUID],
+        damaged_items: List[dict],
+        contact_name: str,
+        contact_phone: str,
+        address: str,
+        requested_by: UUID,
+    ) -> List[dict]:
+        """Dispatch work orders for damaged items from inspection.
+        
+        Groups items by service type and creates one work order per type.
+        """
+        # Group by service domain
+        grouped = {}
+        for item in damaged_items:
+            domain = self._infer_service_domain(item.get("room_name", ""), item.get("item_name", ""))
+            if domain not in grouped:
+                grouped[domain] = []
+            grouped[domain].append(item)
+        
+        results = []
+        for domain, items in grouped.items():
+            item_list = ", ".join([f"{i['room_name']}: {i['item_name']}" for i in items])
+            work_order = await self.create_work_order(
+                property_id=property_id,
+                unit_id=unit_id,
+                ticket_id=inspection_id,  # Use inspection ID as source
+                title=f"Inspection Repair: {domain}",
+                description=f"Items requiring repair from inspection:\n{item_list}",
+                service_domain=domain,
+                service_type="repair",
+                urgency="normal",
+                contact_name=contact_name,
+                contact_phone=contact_phone,
+                address=address,
+                requested_by=requested_by,
+            )
+            if work_order:
+                results.append(work_order)
+        
+        return results
+
+    def _infer_service_domain(self, room_name: str, item_name: str) -> str:
+        """Infer service domain from room/item."""
+        text = f"{room_name} {item_name}".lower()
+        
+        if any(kw in text for kw in ["sink", "faucet", "toilet", "shower", "drain", "pipe"]):
+            return "plumbing"
+        elif any(kw in text for kw in ["outlet", "switch", "light", "electrical", "wire"]):
+            return "electrical"
+        elif any(kw in text for kw in ["hvac", "heat", "cool", "ac", "furnace"]):
+            return "hvac"
+        elif any(kw in text for kw in ["door", "window", "lock", "cabinet"]):
+            return "carpentry"
+        elif any(kw in text for kw in ["paint", "wall", "ceiling"]):
+            return "painting"
+        elif any(kw in text for kw in ["floor", "carpet", "tile"]):
+            return "flooring"
+        else:
+            return "general"
+
 
 # Singleton
 _service_instance: Optional[ServiceBridge] = None
