@@ -18,6 +18,7 @@ from app.routers import (
     turnovers_router,
     dashboard_router,
     reports_router,
+    mason_agent_router,
 )
 
 settings = get_settings()
@@ -61,6 +62,7 @@ app.include_router(bookings_router, prefix=settings.api_v1_prefix)  # STR suppor
 app.include_router(turnovers_router, prefix=settings.api_v1_prefix)  # STR turnover workflow
 app.include_router(dashboard_router, prefix=settings.api_v1_prefix)  # Dashboard & reporting
 app.include_router(reports_router, prefix=settings.api_v1_prefix)  # Financial & operational reports
+app.include_router(mason_agent_router, prefix=settings.api_v1_prefix)  # Mason Auto-Agent Mode
 
 
 @app.get("/health")

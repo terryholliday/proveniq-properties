@@ -11,6 +11,7 @@ from app.routers.bookings import router as bookings_router
 from app.routers.turnovers import router as turnovers_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.reports import router as reports_router
+from app.routers.mason_agent import router as mason_agent_router
 
 __all__ = [
     "auth_router",
@@ -24,4 +25,5 @@ __all__ = [
     "turnovers_router",
     "dashboard_router",
     "reports_router",
+    "mason_agent_router",
 ]
