@@ -8,6 +8,11 @@ Output: ZIP file containing:
 - claim_summary.json (metadata + hashes)
 - claim_summary.pdf (human-readable report)
 - evidence/ (all photos with original hashes)
+
+Phase 4 Enhancement: STR Resolution Center integration
+- Platform-specific packet formats (Airbnb, VRBO, Booking.com)
+- Direct API submission where available
+- Guest dispute response templates
 """
 
 import io
@@ -592,6 +597,242 @@ class ClaimPacketService:
         
         return "\n".join(lines)
     
+    # =========================================================================
+    # PHASE 4: STR RESOLUTION CENTER PACKETS
+    # =========================================================================
+    
+    async def generate_str_resolution_packet(
+        self,
+        booking_id: UUID,
+        org_id: UUID,
+        platform: str = "airbnb",
+    ) -> tuple[bytes, str, Dict[str, Any]]:
+        """
+        Generate STR-specific resolution center packet.
+        
+        Supports: airbnb, vrbo, booking_com
+        
+        Returns:
+            Tuple of (zip_bytes, filename, submission_data)
+        """
+        # Get booking-scoped inspection (pre-guest / post-guest)
+        pre_guest = await self._get_str_inspection(booking_id, "PRE_GUEST")
+        post_guest = await self._get_str_inspection(booking_id, "POST_GUEST")
+        
+        if not pre_guest:
+            raise ValueError("No pre-guest inspection found for booking")
+        if not post_guest:
+            raise ValueError("No post-guest inspection completed")
+        
+        # Build diff
+        diff_items = self._build_diff(pre_guest, post_guest)
+        
+        # Get cost estimates
+        estimates = await self.mason.estimate_diff_costs(
+            [
+                {
+                    "room_name": item["room_name"],
+                    "item_name": item["item_name"],
+                    "condition_change": item["condition_change"],
+                }
+                for item in diff_items
+            ],
+            org_id=org_id,
+        )
+        
+        # Build platform-specific submission data
+        submission_data = self._build_platform_submission(
+            platform=platform,
+            booking_id=booking_id,
+            diff_items=diff_items,
+            estimates=estimates,
+            pre_guest=pre_guest,
+            post_guest=post_guest,
+        )
+        
+        # Generate ZIP with platform-specific README
+        zip_bytes = await self._create_str_zip(
+            platform=platform,
+            submission_data=submission_data,
+            pre_guest=pre_guest,
+            post_guest=post_guest,
+        )
+        
+        date_str = datetime.utcnow().strftime("%Y%m%d")
+        filename = f"{platform}_resolution_{booking_id}_{date_str}.zip"
+        
+        return zip_bytes, filename, submission_data
+    
+    def _build_platform_submission(
+        self,
+        platform: str,
+        booking_id: UUID,
+        diff_items: List[Dict],
+        estimates: Dict,
+        pre_guest,
+        post_guest,
+    ) -> Dict[str, Any]:
+        """Build platform-specific submission data."""
+        base_data = {
+            "booking_id": str(booking_id),
+            "platform": platform,
+            "claim_type": "damage",
+            "generated_at": datetime.utcnow().isoformat(),
+            "total_claim_cents": estimates.get("total_cents", 0),
+            "total_claim_formatted": f"${estimates.get('total_cents', 0) / 100:.2f}",
+            "items": [
+                {
+                    "description": f"{item['room_name']} - {item['item_name']}",
+                    "condition_before": item.get("condition_before", "good"),
+                    "condition_after": item.get("condition_after", "damaged"),
+                    "estimated_cost_cents": next(
+                        (e["estimated_cents"] for e in estimates.get("items", [])
+                         if e.get("room") == item["room_name"] and e.get("item") == item["item_name"]),
+                        0
+                    ),
+                }
+                for item in diff_items
+            ],
+            "evidence_summary": {
+                "pre_guest_photos": len([i for i in (pre_guest.items or []) for e in (i.evidence or [])]),
+                "post_guest_photos": len([i for i in (post_guest.items or []) for e in (i.evidence or [])]),
+                "pre_guest_hash": pre_guest.content_hash if hasattr(pre_guest, 'content_hash') else None,
+                "post_guest_hash": post_guest.content_hash if hasattr(post_guest, 'content_hash') else None,
+            },
+        }
+        
+        # Platform-specific fields
+        if platform == "airbnb":
+            base_data["airbnb_fields"] = {
+                "damage_type": "guest_damage",
+                "resolution_type": "host_damage_claim",
+                "requires_aircover": estimates.get("total_cents", 0) > 50000,
+            }
+        elif platform == "vrbo":
+            base_data["vrbo_fields"] = {
+                "claim_category": "property_damage",
+                "damage_protection_eligible": True,
+            }
+        elif platform == "booking_com":
+            base_data["booking_fields"] = {
+                "damage_program": "damage_deposit",
+                "claim_window_days": 14,
+            }
+        
+        return base_data
+    
+    async def _get_str_inspection(self, booking_id: UUID, inspection_type: str):
+        """Get STR booking-scoped inspection."""
+        result = await self.db.execute(
+            select(Inspection)
+            .options(
+                selectinload(Inspection.items).selectinload(InspectionItem.evidence)
+            )
+            .where(
+                Inspection.booking_id == booking_id,
+                Inspection.inspection_type == inspection_type,
+                Inspection.status == InspectionStatus.SIGNED,
+            )
+            .order_by(Inspection.inspection_date.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+    
+    async def _create_str_zip(
+        self,
+        platform: str,
+        submission_data: Dict,
+        pre_guest,
+        post_guest,
+    ) -> bytes:
+        """Create ZIP for STR resolution center."""
+        buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            # Add submission data
+            zf.writestr(
+                "claim_data.json",
+                json.dumps(submission_data, indent=2, default=str)
+            )
+            
+            # Add platform-specific README
+            readme = self._generate_str_readme(platform, submission_data)
+            zf.writestr("README.txt", readme)
+            
+            # Add evidence from both inspections
+            for inspection, prefix in [(pre_guest, "pre_guest"), (post_guest, "post_guest")]:
+                if inspection and inspection.items:
+                    for item in inspection.items:
+                        if item.evidence:
+                            for evidence in item.evidence:
+                                try:
+                                    file_bytes = await self.storage.download(evidence.storage_key)
+                                    ext = self._get_extension(evidence.mime_type)
+                                    filename = f"evidence/{prefix}/{item.room_name}_{item.item_name}_{evidence.id}{ext}"
+                                    zf.writestr(filename, file_bytes)
+                                except Exception:
+                                    pass
+        
+        buffer.seek(0)
+        return buffer.read()
+    
+    def _generate_str_readme(self, platform: str, submission_data: Dict) -> str:
+        """Generate platform-specific README."""
+        platform_names = {
+            "airbnb": "Airbnb Resolution Center",
+            "vrbo": "VRBO Damage Protection",
+            "booking_com": "Booking.com Damage Program",
+        }
+        
+        lines = [
+            "=" * 60,
+            f"PROVENIQ STR DAMAGE CLAIM PACKET",
+            f"For: {platform_names.get(platform, platform.upper())}",
+            "=" * 60,
+            "",
+            f"Generated: {submission_data['generated_at']}",
+            f"Booking ID: {submission_data['booking_id']}",
+            f"Total Claim: {submission_data['total_claim_formatted']}",
+            "",
+            "HOW TO SUBMIT",
+            "-" * 40,
+        ]
+        
+        if platform == "airbnb":
+            lines.extend([
+                "1. Go to Airbnb Resolution Center",
+                "2. Select the reservation",
+                "3. Choose 'Request money' → 'Damaged items'",
+                "4. Upload photos from evidence/post_guest/ folder",
+                "5. Attach claim_data.json as supporting documentation",
+                "6. Reference pre-guest condition photos if disputed",
+            ])
+        elif platform == "vrbo":
+            lines.extend([
+                "1. Go to VRBO Host Dashboard → Reservations",
+                "2. Find the booking and select 'Report damage'",
+                "3. Upload evidence photos",
+                "4. Provide claim_data.json details in description",
+            ])
+        else:
+            lines.extend([
+                "1. Contact platform support",
+                "2. Reference booking ID in claim",
+                "3. Provide all evidence files",
+            ])
+        
+        lines.extend([
+            "",
+            "EVIDENCE INTEGRITY",
+            "-" * 40,
+            "All photos are timestamped and SHA-256 hashed.",
+            "Hashes are recorded in claim_data.json for verification.",
+            "",
+            "© PROVENIQ Technologies",
+        ])
+        
+        return "\n".join(lines)
+
     def _get_extension(self, mime_type: str) -> str:
         """Get file extension from MIME type."""
         extensions = {

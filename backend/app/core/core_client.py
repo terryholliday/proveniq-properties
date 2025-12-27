@@ -266,6 +266,68 @@ class CoreClient:
                 "error": str(e),
             }
 
+    async def get_property_value_contribution(
+        self,
+        property_id: str,
+        fixtures: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """P2: Calculate how fixture conditions contribute to property value."""
+        try:
+            total_contribution = 0
+            fixture_impacts = []
+            
+            for fixture in fixtures:
+                # Get condition assessment impact
+                condition = fixture.get("condition", "good")
+                estimated_value = fixture.get("estimated_value", 0)
+                
+                # Condition multipliers for property value contribution
+                condition_impacts = {
+                    "new": 1.0,
+                    "excellent": 0.9,
+                    "good": 0.7,
+                    "fair": 0.4,
+                    "poor": 0.1,
+                }
+                
+                impact_multiplier = condition_impacts.get(condition, 0.5)
+                contribution = estimated_value * impact_multiplier * 0.1  # 10% of fixture value contributes to property
+                total_contribution += contribution
+                
+                fixture_impacts.append({
+                    "fixture_id": fixture.get("id"),
+                    "name": fixture.get("name"),
+                    "condition": condition,
+                    "estimated_value": estimated_value,
+                    "value_contribution": round(contribution, 2),
+                    "impact_rating": "positive" if impact_multiplier >= 0.7 else "neutral" if impact_multiplier >= 0.4 else "negative",
+                })
+            
+            # Calculate overall property impact
+            avg_condition_score = sum(
+                {"new": 100, "excellent": 90, "good": 70, "fair": 40, "poor": 10}.get(f.get("condition", "good"), 50) 
+                for f in fixtures
+            ) / max(len(fixtures), 1)
+            
+            return {
+                "property_id": property_id,
+                "total_fixture_contribution": round(total_contribution, 2),
+                "fixture_count": len(fixtures),
+                "fixture_impacts": fixture_impacts,
+                "average_condition_score": round(avg_condition_score, 1),
+                "property_grade": "A" if avg_condition_score >= 85 else "B" if avg_condition_score >= 70 else "C" if avg_condition_score >= 50 else "D",
+                "recommendation": "Well-maintained fixtures add value" if avg_condition_score >= 70 else "Consider repairs to improve property value",
+                "calculated_at": datetime.utcnow().isoformat(),
+            }
+            
+        except Exception as e:
+            print(f"[Core] Property value contribution error: {e}")
+            return {
+                "property_id": property_id,
+                "total_fixture_contribution": 0,
+                "error": str(e),
+            }
+
     async def _get_provenance(
         self,
         paid: str,
