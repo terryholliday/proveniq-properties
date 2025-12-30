@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     app_name: str = "PROVENIQ Properties"
     debug: bool = False
     api_v1_prefix: str = "/v1"
+    allowed_origins: str = "http://localhost:3000"  # Comma-separated list
 
     # Database
     database_url: str

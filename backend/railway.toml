@@ -1,0 +1,47 @@
+# ============================================================================
+# PROVENIQ Properties - Railway Deployment Configuration
+# ============================================================================
+# Railway automatically detects and deploys services from this configuration.
+# Docs: https://docs.railway.app/deploy/config-as-code
+
+[build]
+# Build context is scoped to backend/ directory only (monorepo)
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+watchPaths = ["backend/**"]
+
+[deploy]
+# Start command (overridden by Dockerfile CMD, but explicit here for clarity)
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers $WEB_CONCURRENCY"
+
+# Restart policy: always restart on failure
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# Health check configuration
+# Railway will use the /health endpoint to verify service health
+healthcheckPath = "/health"
+healthcheckTimeout = 10
+
+[deploy.releaseCommand]
+# CRITICAL: Run database migrations BEFORE switching traffic to new deployment
+# This ensures zero-downtime deployments with schema changes
+# Migrations MUST be idempotent and forward-only
+command = "alembic upgrade head"
+
+# Release command timeout (migrations should complete within this window)
+timeout = 300
+
+[env]
+# Environment variables that Railway should inject
+# Actual values are set in Railway dashboard (not committed to git)
+
+# Python environment
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+
+# Production mode
+DEBUG = "false"
+
+# Uvicorn workers (Railway will optimize based on available resources)
+WEB_CONCURRENCY = "2"

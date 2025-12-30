@@ -1,11 +1,13 @@
 """PROVENIQ Properties - FastAPI Application Entry Point."""
 
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.core.env_validation import validate_environment
 from app.routers import (
     auth_router,
     org_router,
@@ -20,6 +22,10 @@ from app.routers import (
     reports_router,
     mason_agent_router,
 )
+
+# CRITICAL: Validate environment before proceeding
+# This will hard-fail (exit 1) if required configuration is missing
+validate_environment()
 
 settings = get_settings()
 
@@ -41,10 +47,16 @@ app = FastAPI(
     redoc_url="/redoc" if settings.debug else None,
 )
 
-# CORS
+# CORS - Dynamically configured from ALLOWED_ORIGINS environment variable
+# In production, wildcard (*) is blocked by env_validation.py
+allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",")]
+
+# Log resolved CORS origins at startup for visibility
+print(f"🔒 CORS configured with origins: {allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Frontend dev
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

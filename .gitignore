@@ -35,7 +35,23 @@ logs/
 htmlcov/
 .pytest_cache/
 
-# Firebase
+# Firebase (CRITICAL - never commit credentials)
 firebase-service-account.json
 *-firebase-adminsdk-*.json
+google-application-credentials.json
+*-service-account-*.json
+
+# Platform deployments
 .vercel
+.railway
+
+# Docker
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# CI/CD
+.github/workflows/*.yml
+
+# Alembic local state
+alembic.ini
