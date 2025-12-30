@@ -176,7 +176,7 @@ async def verify_magic_link(
     access_result = await db.execute(
         select(TenantAccess).where(
             TenantAccess.lease_id == lease.id,
-            TenantAccess.user_id == user.id,
+            TenantAccess.tenant_user_id == user.id,
         )
     )
     existing_access = access_result.scalar_one_or_none()

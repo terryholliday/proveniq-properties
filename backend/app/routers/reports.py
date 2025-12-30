@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.core.security import require_org_member, AuthenticatedUser
+from app.core.security import require_org_admin, AuthenticatedUser
 from app.models.property import Property, Unit
 from app.models.lease import Lease
 from app.models.inspection import Inspection, InspectionItem
@@ -54,7 +54,7 @@ async def get_rent_roll_report(
     property_id: Optional[UUID] = None,
     as_of_date: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Generate rent roll report.
     
@@ -163,7 +163,7 @@ async def get_lease_expiration_report(
     months_ahead: int = Query(default=12, ge=1, le=24),
     property_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Generate lease expiration report.
     
@@ -238,7 +238,7 @@ async def get_maintenance_summary_report(
     end_date: Optional[date] = None,
     property_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Generate maintenance summary report.
     
@@ -319,7 +319,7 @@ async def get_inspection_summary_report(
     end_date: Optional[date] = None,
     property_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Generate inspection summary report.
     
@@ -406,7 +406,7 @@ async def get_cam_reconciliation_report(
     property_id: UUID,
     year: int = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Generate CAM (Common Area Maintenance) reconciliation report.
     

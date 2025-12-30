@@ -511,6 +511,26 @@ async def confirm_photo_upload(
             detail="Cannot upload photos to completed turnover"
         )
 
+    expected_object_path = f"turnovers/{turnover_id}/{data.photo_type.value}.jpg"
+    if data.object_path != expected_object_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid object path for turnover photo",
+        )
+
+    storage = get_storage_service()
+    head_result = await storage.head_object(data.object_path)
+    if not head_result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File not found in storage. Upload may have failed.",
+        )
+    if head_result.get("size") is not None and head_result["size"] != data.file_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size does not match expected size",
+        )
+
     # Create photo record
     photo = TurnoverPhoto(
         turnover_id=turnover_id,

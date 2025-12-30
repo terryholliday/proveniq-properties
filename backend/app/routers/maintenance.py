@@ -54,7 +54,7 @@ async def create_maintenance_ticket(
             .join(TenantAccess)
             .where(
                 Unit.id == data.unit_id,
-                TenantAccess.user_id == current_user.db_user_id,
+                TenantAccess.tenant_user_id == current_user.db_user_id,
             )
         )
 
@@ -101,7 +101,7 @@ async def list_maintenance_tickets(
             .join(Lease)
             .join(TenantAccess)
             .where(
-                TenantAccess.user_id == current_user.db_user_id,
+                TenantAccess.tenant_user_id == current_user.db_user_id,
                 MaintenanceTicket.is_tenant_visible == True,
             )
         )
@@ -144,7 +144,7 @@ async def get_maintenance_ticket(
             .join(TenantAccess)
             .where(
                 MaintenanceTicket.id == ticket_id,
-                TenantAccess.user_id == current_user.db_user_id,
+                TenantAccess.tenant_user_id == current_user.db_user_id,
                 MaintenanceTicket.is_tenant_visible == True,
             )
         )

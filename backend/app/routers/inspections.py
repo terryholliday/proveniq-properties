@@ -91,7 +91,7 @@ async def get_inspection_with_auth(
         access_result = await db.execute(
             select(TenantAccess).where(
                 TenantAccess.lease_id == inspection.lease_id,
-                TenantAccess.user_id == current_user.db_user_id,
+                TenantAccess.tenant_user_id == current_user.db_user_id,
             )
         )
         if not access_result.scalar_one_or_none():
@@ -130,7 +130,7 @@ async def create_inspection(
             .join(TenantAccess)
             .where(
                 Lease.id == data.lease_id,
-                TenantAccess.user_id == current_user.db_user_id,
+                TenantAccess.tenant_user_id == current_user.db_user_id,
             )
         )
 
@@ -176,7 +176,7 @@ async def list_inspections(
             select(Inspection)
             .join(Lease)
             .join(TenantAccess)
-            .where(TenantAccess.user_id == current_user.db_user_id)
+            .where(TenantAccess.tenant_user_id == current_user.db_user_id)
         )
 
     if lease_id:
@@ -378,6 +378,25 @@ async def confirm_evidence_upload(
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
 
+    lease_result = await db.execute(
+        select(Lease).join(Unit).join(Property).where(Lease.id == inspection.lease_id)
+    )
+    lease = lease_result.scalar_one()
+
+    prop_result = await db.execute(
+        select(Property).join(Unit).where(Unit.id == lease.unit_id)
+    )
+    prop = prop_result.scalar_one()
+
+    expected_prefix = (
+        f"orgs/{prop.org_id}/inspections/{inspection_id}/items/{data.inspection_item_id}/"
+    )
+    if not data.object_path.startswith(expected_prefix):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid object path for inspection evidence",
+        )
+
     # Idempotency check - return existing evidence if already confirmed
     existing = await db.execute(
         select(InspectionEvidence).where(
@@ -411,6 +430,16 @@ async def confirm_evidence_upload(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File not found in storage. Upload may have failed.",
+        )
+    if head_result.get("size") is not None and head_result["size"] != data.size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size does not match expected size",
+        )
+    if head_result.get("content_type") and head_result["content_type"] != data.mime_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File content type does not match expected type",
         )
     
     # Extract storage instance ID (GCS generation or S3 ETag)
