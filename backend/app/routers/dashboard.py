@@ -9,7 +9,7 @@ from sqlalchemy import select, func, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import require_org_member, AuthenticatedUser
+from app.core.security import require_org_admin, AuthenticatedUser
 from app.models.property import Property, Unit
 from app.models.lease import Lease
 from app.models.inspection import Inspection
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("/stats")
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Get aggregate dashboard statistics for the organization.
     
@@ -176,7 +176,7 @@ async def get_dashboard_stats(
 async def get_expiring_leases(
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Get leases expiring within the specified number of days.
     
@@ -236,7 +236,7 @@ async def get_expiring_leases(
 async def get_recent_activity(
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Get recent activity across the organization.
     
@@ -325,7 +325,7 @@ async def get_recent_activity(
 @router.get("/occupancy/by-property")
 async def get_occupancy_by_property(
     db: AsyncSession = Depends(get_db),
-    current_user: AuthenticatedUser = Depends(require_org_member),
+    current_user: AuthenticatedUser = Depends(require_org_admin),
 ):
     """Get occupancy breakdown by property.
     
